@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract CertificateRegistry {
+    address public admin;
+
+    struct Certificate {
+        uint256 id;
+        string studentName;
+        string course;
+        string ipfsCID;        // IPFS content ID
+        string fileHash;       // keccak256 hash of original file
+        address issuer;        // university
+        uint256 issuedAt;
+        bool valid;
+    }
+
+    uint256 public nextId = 1;
+    mapping(uint256 => Certificate) public certificates;
+    mapping(string => bool) public usedHashes; // prevent duplicates
+
+    event CertificateIssued(uint256 indexed id, string studentName, string course, string ipfsCID, string fileHash);
+    event CertificateRevoked(uint256 indexed id);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only admin");
+        _;
+    }
+
+    constructor() {
+        admin = msg.sender;
+    }
+
+    function issueCertificate(
+        string calldata _studentName,
+        string calldata _course,
+        string calldata _ipfsCID,
+        string calldata _fileHash
+    ) external onlyAdmin {
+        require(!usedHashes[_fileHash], "Hash already used");
+        uint256 certId = nextId++;
+
+        certificates[certId] = Certificate({
+            id: certId,
+            studentName: _studentName,
+            course: _course,
+            ipfsCID: _ipfsCID,
+            fileHash: _fileHash,
+            issuer: msg.sender,
+            issuedAt: block.timestamp,
+            valid: true
+        });
+
+        usedHashes[_fileHash] = true;
+
+        emit CertificateIssued(certId, _studentName, _course, _ipfsCID, _fileHash);
+    }
+
+    function revokeCertificate(uint256 certId) external onlyAdmin {
+        require(certificates[certId].valid, "Already revoked/invalid");
+        certificates[certId].valid = false;
+        emit CertificateRevoked(certId);
+    }
+
+    function verifyCertificate(string calldata _fileHash) external view returns (bool, Certificate memory) {
+        for (uint256 i = 1; i < nextId; i++) {
+            if (
+                keccak256(abi.encodePacked(certificates[i].fileHash)) ==
+                keccak256(abi.encodePacked(_fileHash))
+            ) {
+                return (certificates[i].valid, certificates[i]);
+            }
+        }
+        revert("Certificate not found");
+    }
+}
